@@ -1,0 +1,572 @@
+/*
+ * Shared tab-group (x-global::navigation.tabs) — the ONE tablist skin.
+ *
+ * Consolidates the four hand-rolled copies of the same visual (board tabs in
+ * nav.css, report deck .rd-tabs, goal-dialog .gv-tabs, Resource Allocation
+ * .ra-tabs) into a single component stylesheet. Two variants:
+ *
+ *   .lt-tabs--attached  gradient accent band + translucent framed segment
+ *                       group + white active pill (board/report look). Uses
+ *                       the theme accents with the conditional --nav-scrim
+ *                       (0 for dark accents; raised per-theme where white
+ *                       controls would fail WCAG AA on light accents).
+ *   .lt-tabs--floating  free-floating fully-rounded glass pills (Resource
+ *                       Allocation look); .lt-tabs--dark for dark headers.
+ *   .lt-tabs--underline section tabs inside white cards/modals (hairline row,
+ *                       active section underlined); also skins the legacy
+ *                       jQuery-UI .tab-primary tab sets.
+ *
+ * Behavior (ARIA, keyboard, persistence) lives in the component's script.
+ */
+
+/* ── Shared structure ─────────────────────────────────────────────── */
+.lt-tabs {
+    display: flex;
+    align-items: center;
+}
+.lt-tabs-group {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.lt-tabs-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lt-tab {
+    font-family: inherit;
+    font-size: var(--base-font-size);
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    transition: all .14s ease;
+    letter-spacing: .1px;
+}
+.lt-tab i {
+    font-size: var(--font-size-s);
+    opacity: .9;
+}
+.lt-tab:hover:not(.on) {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.14);
+}
+.lt-tab:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: -2px;
+}
+.lt-tab.on {
+    color: var(--primary-font-color);
+    background: #fff;
+    font-weight: 600;
+}
+.lt-tab.on i {
+    color: var(--accent1);
+    opacity: 1;
+}
+.lt-tab.on:focus-visible {
+    outline: 2px solid var(--accent1);
+    outline-offset: -2px;
+}
+
+/* Count badge */
+.lt-tab .ct {
+    font-size: var(--font-size-s);
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    border-radius: 100px;
+    padding: 1px 8px;
+    line-height: 1.5;
+}
+.lt-tab.on .ct {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--accent1);
+}
+
+/* ── Attached variant: gradient band (board/report family) ────────── */
+.lt-tabs--attached {
+    padding: 7px 10px;
+    margin-bottom: 10px;
+    border-radius: 14px;
+    background:
+        linear-gradient(rgba(0, 0, 0, var(--nav-scrim, 0)), rgba(0, 0, 0, var(--nav-scrim, 0))),
+        linear-gradient(90deg, var(--accent1), var(--accent2));
+    /* Flat, no shadow — the bar must read as one system with the content
+       below it, not a separate floating element (Marcel, nav redesign). */
+    box-shadow: none;
+}
+.lt-tabs--attached .lt-tabs-group {
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 11px;
+    padding: 3px;
+    gap: 2px;
+}
+.lt-tabs--attached .lt-tab {
+    padding: 7px 14px;
+    border-radius: 9px;
+}
+/* Action-less pages hug the band to its tabs (compact nav, not an empty bar). */
+.lt-tabs--attached:not(:has(.lt-tabs-actions)) {
+    width: fit-content;
+}
+
+/* ── Floating variant: glass pills (Resource Allocation family) — THE
+      standard look for horizontal tab navs (design call 2026-08-03). The
+      glass container lives on the GROUP so page-level actions (period
+      pickers, New/Filter/Group By) sit inline on the same row, borderless,
+      on the page background. ─────────────────────────────────────────── */
+.lt-tabs--floating {
+    display: flex;
+    align-items: center;
+    margin: 0 0 8px;
+    position: relative;
+}
+/* The view bar sits between the page header and the content box: same 10px gap below it as above
+   (.maincontent's padding-top), so every page has one rhythm between boxes. */
+.lt-tabs--floating.lt-tabs--links {
+    margin-bottom: 10px;
+}
+
+.lt-tabs--floating .lt-tabs-group {
+    gap: 2px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 100px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+.lt-tabs--floating .lt-tab {
+    padding: 8px 16px;
+    border-radius: 100px;
+}
+.lt-tabs--floating .lt-tab.on,
+.lt-tabs--floating .lt-tab.is-active {
+    box-shadow: 0 2px 6px rgba(20, 40, 50, .12);
+}
+
+/* Link flavor — server-side-active nav tabs (board/timeline views): same
+   pills, <ul><li class="active"><a> structure. */
+.lt-tabs--links .lt-tabs-group ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.lt-tabs--links .lt-tabs-group li {
+    list-style: none;
+    margin: 0;
+}
+.lt-tabs--links .lt-tabs-group li a {
+    font-family: inherit;
+    font-size: var(--base-font-size);
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    transition: all .14s ease;
+    letter-spacing: .1px;
+    padding: 8px 16px;
+    border-radius: 100px;
+}
+.lt-tabs--links .lt-tabs-group li:not(.active) a:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.14);
+}
+.lt-tabs--links .lt-tabs-group li a:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: -2px;
+}
+.lt-tabs--links .lt-tabs-group li.active a {
+    color: var(--primary-font-color);
+    background: #fff;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(20, 40, 50, .12);
+}
+.lt-tabs--links .lt-tabs-group li.active a:focus-visible {
+    outline: 2px solid var(--accent1);
+    outline-offset: -2px;
+}
+
+/* ── Underline variant: SECTION tabs inside white cards and modals ───
+      (To-Do / Goal / plugin modals, Company settings, My Profile, project
+      and client settings). They switch which part of one thing you edit,
+      so they stay quiet and flat — a full-width hairline with the active
+      section underlined — and never look like the view pills above the
+      content box. The jQuery-UI tab sets (.tabbedwidget.tab-primary) keep
+      their ul/li/a markup because plugins print tabs into it, and get the
+      same skin here (design call 2026-10-10). ──────────────────────────── */
+.lt-tabs--underline,
+.tab-primary.ui-tabs .ui-tabs-nav {
+    --section-tab-muted: color-mix(in srgb, var(--primary-font-color) 70%, transparent);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 2px;
+    height: auto;
+    margin: 0 0 15px;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--main-border-color);
+    border-radius: 0;
+    box-shadow: none;
+}
+.lt-tabs--underline .lt-tabs-group {
+    gap: 2px;
+}
+.tab-primary.ui-tabs .ui-tabs-nav > li {
+    float: none;
+    border: 0;
+}
+.lt-tabs--underline .lt-tab,
+body .tab-primary.ui-tabs .ui-tabs-nav > li > a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 40px;
+    line-height: 1;
+    margin-bottom: -1px;
+    padding: 0 12px;
+    font-size: var(--base-font-size);
+    font-weight: 500;
+    color: var(--section-tab-muted);
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: var(--box-radius-small) var(--box-radius-small) 0 0;
+    opacity: 1;
+}
+.lt-tabs--underline .lt-tab i,
+.tab-primary.ui-tabs .ui-tabs-nav > li > a .fa,
+.tab-primary.ui-tabs .ui-tabs-nav > li > a [class*="fa-"] {
+    font-size: var(--font-size-s);
+    opacity: 1;
+}
+.lt-tabs--underline .lt-tab:hover:not(.on),
+body .tab-primary.ui-tabs .ui-tabs-nav > li:not(.ui-state-active) > a:hover {
+    color: var(--primary-font-color);
+    background: var(--tab-hover-background, var(--neutral));
+}
+.lt-tabs--underline .lt-tab.on,
+body .tab-primary.ui-tabs .ui-tabs-nav > li.ui-state-active > a {
+    color: var(--primary-font-color);
+    background: none;
+    border-bottom-color: var(--accent1);
+    font-weight: 500;
+}
+.lt-tabs--underline .lt-tab.on i,
+.tab-primary.ui-tabs .ui-tabs-nav > li.ui-state-active > a .fa,
+.tab-primary.ui-tabs .ui-tabs-nav > li.ui-state-active > a [class*="fa-"] {
+    color: var(--accent1);
+}
+.lt-tabs--underline .lt-tab:focus-visible,
+.tab-primary.ui-tabs .ui-tabs-nav > li > a:focus-visible {
+    outline: 2px solid var(--accent1);
+    outline-offset: -2px;
+}
+.lt-tabs--underline .lt-tab .ct {
+    background: var(--tab-hover-background, var(--neutral));
+    color: var(--section-tab-muted);
+}
+.lt-tabs--underline .lt-tab.on .ct {
+    background: color-mix(in srgb, var(--accent1) 10%, transparent);
+    color: var(--accent1);
+}
+/* Phones: one scrolling row instead of a stacked list (mobile.css stretches
+   every .tabbedwidget li to 100%). */
+@media (max-width: 1200px) {
+    .lt-tabs--underline,
+    .lt-tabs--underline .lt-tabs-group,
+    .tab-primary.ui-tabs .ui-tabs-nav,
+    .nyroModalCont .tab-primary.ui-tabs .ui-tabs-nav {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .tab-primary.ui-tabs .ui-tabs-nav > li {
+        width: auto;
+        flex: none;
+    }
+    .lt-tabs--underline .lt-tab,
+    body .tab-primary.ui-tabs .ui-tabs-nav > li > a {
+        white-space: nowrap;
+    }
+}
+
+/* Inline actions (right cluster) — borderless on the page background.
+   Ported from the retired band (.maincontentinner.tabs .tabs-actions). */
+.lt-tabs-actions .btn {
+    line-height: 1.2;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+    font-size: var(--base-font-size);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+/* Bootstrap's `.btn .caret { margin-top: 8px }` lines the caret up in a 20px
+   inline line box; in the flex button above it just pushes it down. */
+.lt-tabs-actions .btn .caret {
+    margin: 0;
+    vertical-align: middle;
+}
+.lt-tabs-actions .btn .badge {
+    line-height: 1;
+    padding: 3px 6px;
+    font-size: var(--font-size-xs); /* counter on a button, like an icon badge */
+    height: auto;
+    align-self: center;
+}
+/* Filter / Group By match the report period-picker: white pill, dark text
+   (design call 2026-08-03 — one filter style everywhere). Three classes so
+   this outranks forms.css `body .btn.btn-link` (0-2-1), which otherwise
+   flattens the pill back to transparent text. */
+.lt-tabs .lt-tabs-actions .btn-link {
+    color: var(--primary-font-color);
+    opacity: 1;
+    background: #fff;
+    border: 1px solid var(--main-border-color);
+    border-radius: 22px;
+    padding: 7px 14px;
+    box-shadow: 0 1px 3px rgba(20, 40, 50, .06);
+    transition: border-color .12s ease;
+}
+/* Hover is the SAME dark-grey fill the secondary buttons in the content card
+   below use (--secondary-action-hover-bg / -color). These pills used to shift
+   only their border color, so the two rows of controls on one screen answered
+   the pointer in two different visual languages. */
+.lt-tabs .lt-tabs-actions .btn-link:hover {
+    border-color: var(--secondary-action-hover-bg);
+    background: var(--secondary-action-hover-bg);
+    color: var(--secondary-action-hover-color);
+}
+
+/* The count badge and icon inherit the pill's ink, so they have to flip with
+   it or they vanish against the dark fill. */
+.lt-tabs .lt-tabs-actions .btn-link:hover i,
+.lt-tabs .lt-tabs-actions .btn-link:hover .badge {
+    color: var(--secondary-action-hover-color);
+}
+.lt-tabs .lt-tabs-actions .btn-link:focus-visible {
+    outline: 2px solid var(--accent1);
+    outline-offset: 2px;
+}
+.lt-tabs-actions .btn:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+/* DIRECT children only. As a descendant selector this reached into any form
+   nested deeper in the actions cluster — including the report period picker's
+   custom-range form inside its popover. Turning that into an inline-flex row
+   put the "CUSTOM" label beside the From/To inputs and sized the row to its
+   content, so it burst straight out of the 280px menu and off the screen edge. */
+.lt-tabs-actions > form {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+}
+.lt-tabs-actions .filterWrapper {
+    margin-bottom: 0 !important;
+    display: inline-flex;
+    align-items: center;
+}
+/* An inline range control in the actions (My Timesheets week range): label text and arrows on the
+   page background, fields on one line. */
+.lt-tabs-actions .lt-tabs-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #fff;
+    font-size: var(--base-font-size);
+    font-weight: 500;
+}
+.lt-tabs-actions .lt-tabs-range a {
+    color: #fff;
+    padding: 0 4px;
+}
+.lt-tabs-actions .lt-tabs-range input {
+    margin: 0;
+}
+
+/* A toggle's label in the actions ("Show Tasks") sits on the page background. */
+.lt-tabs-actions input.toggle + label {
+    color: #fff;
+}
+
+/* Right-edge actions: panels/menus open LEFTWARD or they fall off screen. */
+.lt-tabs-actions .filterBar,
+.lt-tabs-actions .dropdown-menu {
+    left: auto !important;
+    right: 0;
+}
+.lt-tabs-actions .btn-group {
+    float: none;
+    margin: 0 !important;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Floating on a dark header (server-stamped by the caller) */
+.lt-tabs--dark {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+.lt-tabs--dark .lt-tab.on {
+    color: #182831;
+}
+
+/* ── Print: tabs are navigation, not content ──────────────────────── */
+@media print {
+    .lt-tabs {
+        display: none;
+    }
+}
+
+/* navigation.steps — numbered dots joined by a line; done = check, current = accent ring. */
+.lt-steps {
+    display: flex;
+    margin: 0 0 16px;
+    padding: 0;
+    list-style: none;
+    counter-reset: none;
+}
+
+.lt-step {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+    text-align: center;
+}
+
+/* The line from this step's dot back to the previous one (logical sides, so it mirrors in RTL). */
+.lt-step + .lt-step::before {
+    content: '';
+    position: absolute;
+    top: 13px;
+    inset-inline-end: 50%;
+    width: 100%;
+    height: 2px;
+    background: var(--main-border-color);
+}
+
+.lt-step--done + .lt-step::before,
+.lt-step--done + .lt-step--current::before {
+    background: var(--accent1);
+}
+
+.lt-step-link {
+    display: contents;
+    color: inherit;
+    text-decoration: none;
+}
+
+.lt-step-dot {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--main-border-color);
+    border-radius: 50%;
+    background: var(--secondary-background);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-s);
+    font-weight: var(--font-weight-semibold);
+}
+
+.lt-step--done .lt-step-dot {
+    border-color: var(--accent1);
+    background: var(--accent1);
+    color: var(--accent1-color);
+}
+
+.lt-step--current .lt-step-dot {
+    border-color: var(--accent1);
+    color: var(--accent1);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent1) 15%, transparent);
+}
+
+.lt-step-text {
+    display: flex;
+    flex-direction: column;
+    margin-top: 6px;
+    padding: 0 4px;
+}
+
+.lt-step-label {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-s);
+    font-weight: var(--font-weight-semibold);
+}
+
+.lt-step--done .lt-step-label,
+.lt-step--current .lt-step-label {
+    color: var(--primary-font-color);
+}
+
+.lt-step-desc {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-s);
+}
+
+a.lt-step-link:hover .lt-step-label,
+a.lt-step-link:focus-visible .lt-step-label {
+    color: var(--primary-font-color);
+}
+
+/* The link is `display: contents` (no box for the global a:focus-visible outline), so the label
+   carries the keyboard focus ring. */
+a.lt-step-link:focus-visible .lt-step-label {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: var(--box-radius-small);
+}
+
+/* Vertical rail */
+.lt-steps--vertical {
+    flex-direction: column;
+    gap: 16px;
+}
+
+.lt-steps--vertical .lt-step {
+    flex-direction: row;
+    align-items: flex-start;
+    text-align: start;
+}
+
+.lt-steps--vertical .lt-step + .lt-step::before {
+    top: auto;
+    inset-inline-end: auto;
+    bottom: 100%;
+    inset-inline-start: 13px;
+    width: 2px;
+    height: 16px;
+}
+
+.lt-steps--vertical .lt-step-text {
+    margin: 4px 0 0;
+    margin-inline-start: 10px;
+    padding: 0;
+}

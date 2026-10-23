@@ -1,0 +1,463 @@
+<?php
+
+namespace Tests\Unit\app\Domain\Api\Controllers;
+
+use Leantime\Core\Application;
+use Leantime\Core\Auth\Permissions\PermissionEnforcer;
+use Leantime\Core\Bootstrap\LoadConfig;
+use Leantime\Core\Bootstrap\SetRequestForConsole;
+use Leantime\Core\Language;
+use Leantime\Core\UI\Template;
+use Leantime\Domain\Api\Controllers\Jsonrpc;
+
+/**
+ * The controller now builds its envelopes through the JsonRpcResponse / JsonRpcErrorResponse
+ * response types, so these tests assert on the actual JSON body of the returned Response
+ * (behavior) rather than on the Template::displayJson() call that used to construct it.
+ */
+class JsonrpcTest extends \Unit\TestCase
+{
+    private Jsonrpc $controller;
+
+    private Template $template;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app = new Application(APP_ROOT);
+        $this->app->bootstrapWith([LoadConfig::class, SetRequestForConsole::class]);
+
+        $this->app->boot();
+        $this->app['view'] = $this->createMock(\Illuminate\View\Factory::class);
+        $this->app['session'] = $this->createMock(\Illuminate\Session\SessionManager::class);
+        $this->app->bootstrapWith([LoadConfig::class, SetRequestForConsole::class]);
+
+        // Jsonrpc::init() now type-hints PermissionEnforcer (resolved via app()->call in the
+        // base Controller constructor). Bind a no-op mock so the controller builds without
+        // pulling in the full permission engine (PermissionService -> Repository -> Db), which
+        // this minimal test container can't resolve. These tests don't exercise authorization.
+        $this->app->instance(PermissionEnforcer::class, $this->createMock(PermissionEnforcer::class));
+
+        $this->template = $this->createMock(Template::class);
+        $language = $this->createMock(Language::class);
+        $this->controller = new Jsonrpc($this->app['request'], $this->template, $language);
+        $_SERVER['REQUEST_METHOD'] = 'post';
+    }
+
+    private function bodyOf($response): array
+    {
+        return json_decode($response->getContent(), true);
+    }
+
+    public function test_method_string_parsing()
+    {
+        $params = [
+            'method' => 'leantime.rpc.Comments.pollComments',
+            'params' => ['projectId' => 1],
+            'id' => 1,
+            'jsonrpc' => '2.0',
+        ];
+
+        $body = $this->bodyOf($this->controller->post($params));
+
+        $this->assertIsArray($body);
+        $this->assertArrayHasKey('jsonrpc', $body);
+        $this->assertEquals('2.0', $body['jsonrpc']);
+    }
+
+    public function test_invalid_method_string()
+    {
+        $params = [
+            'method' => 'invalid.method.string',
+            'params' => ['projectId' => 1],
+            'id' => 1,
+            'jsonrpc' => '2.0',
+        ];
+
+        $body = $this->bodyOf($this->controller->post($params));
+
+        $this->assertArrayHasKey('error', $body);
+        $this->assertEquals(-32602, $body['error']['code']);
+    }
+
+    public function test_missing_json_rpc_version()
+    {
+        $params = [
+            'method' => 'leantime.rpc.Comments.pollComments',
+            'params' => ['projectId' => 1],
+            'id' => 1,
+        ];
+
+        $body = $this->bodyOf($this->controller->post($params));
+
+        $this->assertArrayHasKey('error', $body);
+        $this->assertEquals(-32600, $body['error']['code']);
+    }
+
+    public function test_batch_request()
+    {
+        $params = [
+            [
+                'method' => 'leantime.rpc.Comments.pollComments',
+                'params' => ['projectId' => 1],
+                'id' => 1,
+                'jsonrpc' => '2.0',
+            ],
+            [
+                'method' => 'leantime.rpc.Comments.pollComments',
+                'params' => ['projectId' => 2],
+                'id' => 2,
+                'jsonrpc' => '2.0',
+            ],
+        ];
+
+        $body = $this->bodyOf($this->controller->post($params));
+
+        // The batch response is an array with one envelope per sub-request.
+        $this->assertIsArray($body);
+        $this->assertCount(2, $body);
+    }
+
+    /**
+     * The riskiest behavioral change: the service-call catch is now catch(\Throwable) and an
+     * UNEXPECTED throwable must be collapsed to a generic -32000 with its message NOT leaked.
+     * Driven end-to-end through the controller by rebinding the (@api) Comments service to a
+     * stub that throws.
+     */
+    public function test_service_throwing_unknown_error_is_generic_and_not_leaked()
+    {
+        $secret = 'super-secret-internal-detail';
+
+        $this->app->bind(
+            \Leantime\Domain\Comments\Services\Comments::class,
+            fn () => new class($secret)
+            {
+                public function __construct(private string $secret) {}
+
+                public function pollComments(?int $projectId = null, ?int $moduleId = null): array
+                {
+                    throw new \RuntimeException($this->secret);
+                }
+            }
+        );
+
+        $params = [
+            'method' => 'leantime.rpc.Comments.pollComments',
+            'params' => ['projectId' => 1],
+            'id' => 42,
+            'jsonrpc' => '2.0',
+        ];
+
+        $response = $this->controller->post($params);
+        $body = $this->bodyOf($response);
+
+        $this->assertSame(-32000, $body['error']['code']);
+        $this->assertSame('Server error', $body['error']['message']);
+        $this->assertSame(42, $body['id']);
+        $this->assertStringNotContainsString($secret, $response->getContent());
+    }
+
+    /**
+     * A typed Leantime exception thrown by a service maps to ITS JSON-RPC code (here -32001 for
+     * AuthorizationException), not the generic -32000, with the request id preserved.
+     */
+    public function test_service_throwing_typed_exception_maps_to_its_rpc_code()
+    {
+        $this->app->bind(
+            \Leantime\Domain\Comments\Services\Comments::class,
+            fn () => new class
+            {
+                public function pollComments(?int $projectId = null, ?int $moduleId = null): array
+                {
+                    throw new \Leantime\Core\Exceptions\AuthorizationException;
+                }
+            }
+        );
+
+        $params = [
+            'method' => 'leantime.rpc.Comments.pollComments',
+            'params' => ['projectId' => 1],
+            'id' => 7,
+            'jsonrpc' => '2.0',
+        ];
+
+        $body = $this->bodyOf($this->controller->post($params));
+
+        $this->assertSame(-32001, $body['error']['code']);
+        $this->assertSame(7, $body['id']);
+    }
+
+    /**
+     * A notification (no id) whose service call fails must NOT be responded to — the controller
+     * returns an empty 200 instead of a JSON-RPC error envelope (JSON-RPC 2.0).
+     */
+    public function test_notification_service_failure_returns_empty_200()
+    {
+        $this->app->bind(
+            \Leantime\Domain\Comments\Services\Comments::class,
+            fn () => new class
+            {
+                public function pollComments(?int $projectId = null, ?int $moduleId = null): array
+                {
+                    throw new \RuntimeException('boom');
+                }
+            }
+        );
+
+        // No 'id' => JSON-RPC notification.
+        $params = [
+            'method' => 'leantime.rpc.Comments.pollComments',
+            'params' => ['projectId' => 1],
+            'jsonrpc' => '2.0',
+        ];
+
+        $response = $this->controller->post($params);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('', $response->getContent());
+    }
+
+    /**
+     * @api detection must only recognize the tag at the START of a docblock line (" * @api").
+     * A method whose docblock merely MENTIONS @api in prose (e.g. a de-@api'd internal helper
+     * documented as "not exposed, unlike @api methods") must NOT become JSON-RPC reachable —
+     * regression guard for the IDOR fix where "Not @api:" still matched the old /@api\b/ regex.
+     */
+    public function test_api_detection_requires_the_tag_at_a_docblock_line_start(): void
+    {
+        $isApiMethod = new \ReflectionMethod(Jsonrpc::class, 'isApiMethod');
+        $isApiMethod->setAccessible(true);
+        $invoke = fn (string $class, string $method): bool => $isApiMethod->invoke($this->controller, $class, $method);
+
+        // A genuine ` * @api` docblock line IS recognized.
+        $this->assertTrue($invoke(IsApiFixture::class, 'realApiMethod'));
+        // A prose mention of @api (and a method with no docblock) must NOT be recognized.
+        $this->assertFalse($invoke(IsApiFixture::class, 'proseMentionMethod'));
+        $this->assertFalse($invoke(IsApiFixture::class, 'noDocblockMethod'));
+
+        // The real de-@api'd internal helpers must NOT be JSON-RPC reachable (IDOR fixes):
+        $this->assertFalse($invoke(\Leantime\Domain\Clients\Services\Clients::class, 'getUserClients'));
+        $this->assertFalse($invoke(\Leantime\Domain\Users\Services\Users::class, 'setProfilePicture'));
+        $this->assertFalse($invoke(\Leantime\Domain\Users\Services\Users::class, 'editOwn'));
+        // ...while a genuine @api service method stays reachable.
+        $this->assertTrue($invoke(\Leantime\Domain\Clients\Services\Clients::class, 'getAll'));
+    }
+
+    /**
+     * #3754: ReflectionUnionType has no getName(), so every union-typed @api method failed with
+     * "Could not cast parameter". Values matching a member pass through; others are cast.
+     */
+    public function test_union_typed_parameters_are_accepted(): void
+    {
+        $prepare = new \ReflectionMethod(Jsonrpc::class, 'prepareParameters');
+        $prepare->setAccessible(true);
+        $methodParams = (new \ReflectionMethod(UnionTypeFixture::class, 'find'))->getParameters();
+
+        $this->assertSame([5, ['a'], null], $prepare->invoke($this->controller, ['id' => 5, 'flags' => ['a'], 'limit' => null], $methodParams));
+        $this->assertSame(['abc', true, 10], $prepare->invoke($this->controller, ['id' => 'abc', 'flags' => true, 'limit' => '10'], $methodParams));
+        $this->assertSame([7, false, null], $prepare->invoke($this->controller, ['id' => 7], $methodParams));
+    }
+
+    /**
+     * #3755: board/goal methods that authorize against the real project are reachable over RPC.
+     */
+    public function test_goalcanvas_board_methods_are_rpc_reachable(): void
+    {
+        $isApiMethod = new \ReflectionMethod(Jsonrpc::class, 'isApiMethod');
+        $isApiMethod->setAccessible(true);
+
+        foreach (['getSingleCanvas', 'createGoalboard', 'updateGoalboard', 'getGoalsByMilestone'] as $method) {
+            $this->assertTrue(
+                $isApiMethod->invoke($this->controller, \Leantime\Domain\Goalcanvas\Services\Goalcanvas::class, $method),
+                "Goalcanvas::$method must be reachable over JSON-RPC"
+            );
+        }
+    }
+
+    /**
+     * Regression guard for the JSON-RPC account-takeover report (fenko.nz, Sept 2026).
+     *
+     * A read-only user could call leantime.rpc.auth.onboarding.saveAccount with a crafted
+     * $userInvite (any id, role 50, new password), then completeOnboarding to activate the
+     * account, then twoFA.disable2FA on the victim's id. None of those steps had an
+     * authorization check — they only ever made sense behind the invite link / session user —
+     * so they must not be reachable over JSON-RPC at all. The raw company-wide listings the
+     * same report flagged must carry a GLOBAL #[RequiresPermission] gate instead.
+     */
+    public function test_account_takeover_chain_is_not_rpc_reachable(): void
+    {
+        $isApiMethod = new \ReflectionMethod(Jsonrpc::class, 'isApiMethod');
+        $isApiMethod->setAccessible(true);
+        $invoke = fn (string $class, string $method): bool => $isApiMethod->invoke($this->controller, $class, $method);
+
+        $mustBeInternal = [
+            [\Leantime\Domain\Auth\Services\Onboarding::class, 'getInviteSettings'],
+            [\Leantime\Domain\Auth\Services\Onboarding::class, 'saveAccount'],
+            [\Leantime\Domain\Auth\Services\Onboarding::class, 'saveThemeChoice'],
+            [\Leantime\Domain\Auth\Services\Onboarding::class, 'saveColorChoice'],
+            [\Leantime\Domain\Auth\Services\Onboarding::class, 'saveSchedule'],
+            [\Leantime\Domain\Auth\Services\Onboarding::class, 'completeOnboarding'],
+            [\Leantime\Domain\TwoFA\Services\TwoFA::class, 'getSetupData'],
+            [\Leantime\Domain\TwoFA\Services\TwoFA::class, 'saveSecret'],
+            [\Leantime\Domain\TwoFA\Services\TwoFA::class, 'verifyAndEnable'],
+            [\Leantime\Domain\TwoFA\Services\TwoFA::class, 'disable2FA'],
+            [\Leantime\Domain\Notifications\Services\Notifications::class, 'addNotifications'],
+            [\Leantime\Domain\Cron\Services\Cron::class, 'runScheduledTasks'],
+            [\Leantime\Domain\Queue\Services\Queue::class, 'processQueue'],
+            // Follow-up sweep of the same shape (caller-supplied ids / infrastructure triggers):
+            [\Leantime\Domain\Install\Services\Install::class, 'runInstall'],
+            [\Leantime\Domain\Install\Services\Install::class, 'runUpdate'],
+            [\Leantime\Domain\Api\Services\Api::class, 'getAPIKeyUser'],
+            [\Leantime\Domain\Menu\Services\Menu::class, 'getProjectSelectorViewData'],
+            [\Leantime\Domain\Reactions\Services\Reactions::class, 'getUserReactions'],
+            [\Leantime\Domain\Notifications\Services\Notifications::class, 'processMentions'],
+        ];
+
+        // #3755: these two take a caller-supplied $userId with no check, so they stay internal.
+        $mustBeInternal[] = [\Leantime\Domain\Tickets\Services\Tickets::class, 'getRecentlyCompletedTicketsByUser'];
+        $mustBeInternal[] = [\Leantime\Domain\Tickets\Services\Tickets::class, 'goalsRelatedToWork'];
+        // Became reachable with union-typed parameters (#3754) but trust caller-supplied security
+        // context (client/role, or post to project webhooks unauthenticated), so they stay internal.
+        $mustBeInternal[] = [\Leantime\Domain\Users\Services\Users::class, 'inviteNewUser'];
+        $mustBeInternal[] = [\Leantime\Domain\Notifications\Services\Messengers::class, 'sendNotificationToMessengers'];
+
+        foreach ($mustBeInternal as [$class, $method]) {
+            $this->assertFalse($invoke($class, $method), "$class::$method must not be reachable over JSON-RPC");
+        }
+
+        $mustBeGloballyGated = [
+            [\Leantime\Domain\Projects\Services\Projects::class, 'getAllProjects'],
+            [\Leantime\Domain\Projects\Services\Projects::class, 'getAllUsers'],
+            [\Leantime\Domain\Projects\Services\Projects::class, 'getEmployees'],
+            [\Leantime\Domain\Api\Services\Api::class, 'getAllProjects'],
+            // Installed-plugin rows carry the marketplace license key.
+            [\Leantime\Domain\Plugins\Services\Plugins::class, 'getAllPlugins'],
+            [\Leantime\Domain\Plugins\Services\Plugins::class, 'getEnabledPlugins'],
+        ];
+
+        foreach ($mustBeGloballyGated as [$class, $method]) {
+            $attributes = (new \ReflectionMethod($class, $method))
+                ->getAttributes(\Leantime\Core\Auth\Permissions\RequiresPermission::class);
+
+            $this->assertNotEmpty($attributes, "$class::$method must declare #[RequiresPermission]");
+            $this->assertTrue($attributes[0]->newInstance()->global, "$class::$method must be gated on a GLOBAL permission");
+        }
+    }
+
+    /**
+     * Regression guard: a forged leantime.rpc.projects.notifyProjectUsers call reached every
+     * notification channel — email queue, project messengers, push, in-app and the recipients'
+     * personal webhooks — with caller-chosen project, author, subject, message and link.
+     * notifyProjectUsers has no authorization of its own; it is only ever the internal last
+     * step after a service or controller already authorized the change. Driven end-to-end
+     * through the controller: the call must be refused as method-not-found and the service
+     * (the single entry point to all of those channels) must never be invoked.
+     */
+    public function test_forged_notify_project_users_is_not_rpc_reachable(): void
+    {
+        $dispatchedNotifications = new \ArrayObject;
+
+        $this->app->bind(
+            \Leantime\Domain\Projects\Services\Projects::class,
+            fn () => new class($dispatchedNotifications)
+            {
+                public function __construct(private \ArrayObject $dispatchedNotifications) {}
+
+                public function notifyProjectUsers(\Leantime\Domain\Notifications\Models\Notification $notification): void
+                {
+                    $this->dispatchedNotifications->append($notification);
+                }
+            }
+        );
+
+        $params = [
+            'method' => 'leantime.rpc.projects.notifyProjectUsers',
+            'params' => [
+                'notification' => [
+                    'id' => 0,
+                    'projectId' => 5,
+                    'authorId' => 1,
+                    'module' => 'tickets',
+                    'action' => 'updated',
+                    'subject' => 'Password reset required',
+                    'message' => 'Your session expired, sign in again',
+                    'url' => ['url' => 'https://attacker.example/login', 'text' => 'Sign in'],
+                    'entity' => ['id' => 42],
+                ],
+            ],
+            'id' => 9,
+            'jsonrpc' => '2.0',
+        ];
+
+        $body = $this->bodyOf($this->controller->post($params));
+
+        $this->assertCount(0, $dispatchedNotifications, 'A forged notification must never reach Projects::notifyProjectUsers (and so no notification channel)');
+        $this->assertSame(-32601, $body['error']['code'] ?? null, 'Projects::notifyProjectUsers must be method-not-found over JSON-RPC');
+        $this->assertSame(9, $body['id']);
+    }
+
+    /**
+     * The personal-webhook queue is drained by the scheduler only. Reachable over JSON-RPC, any
+     * authenticated caller could make the server run webhook deliveries on demand. Driven
+     * end-to-end through the controller: refused as method-not-found, never invoked.
+     */
+    public function test_webhook_queue_is_not_rpc_reachable(): void
+    {
+        $queueRuns = new \ArrayObject;
+        $this->assertTrue(
+            method_exists(\Leantime\Domain\Notifications\Services\WebhookQueue::class, 'processQueue'),
+            'Guards the real scheduler entry point, not a method that does not exist'
+        );
+
+        $this->app->bind(
+            \Leantime\Domain\Notifications\Services\WebhookQueue::class,
+            fn () => new class($queueRuns)
+            {
+                public function __construct(private \ArrayObject $queueRuns) {}
+
+                public function processQueue(): void
+                {
+                    $this->queueRuns->append(true);
+                }
+            }
+        );
+
+        $body = $this->bodyOf($this->controller->post([
+            'method' => 'leantime.rpc.notifications.webhookQueue.processQueue',
+            'params' => [],
+            'id' => 11,
+            'jsonrpc' => '2.0',
+        ]));
+
+        $this->assertCount(0, $queueRuns, 'A JSON-RPC call must never run the webhook queue');
+        $this->assertSame(-32601, $body['error']['code'] ?? null, 'WebhookQueue::processQueue must be method-not-found over JSON-RPC');
+        $this->assertSame(11, $body['id']);
+    }
+}
+
+/**
+ * Fixture for union-typed parameter casting (#3754).
+ */
+class UnionTypeFixture
+{
+    public function find(int|string $id, array|bool $flags = false, ?int $limit = null): void {}
+}
+
+/**
+ * Fixture for isApiMethod() docblock-detection tests.
+ */
+class IsApiFixture
+{
+    /**
+     * @api
+     */
+    public function realApiMethod(): void {}
+
+    /**
+     * @internal Not exposed over JSON-RPC, unlike @api methods — a prose mention only.
+     */
+    public function proseMentionMethod(): void {}
+
+    public function noDocblockMethod(): void {}
+}

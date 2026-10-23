@@ -1,0 +1,776 @@
+/* Ticket Labelled dropdowns */
+
+.dropdown-menu {
+    margin-top: 0;
+    border-radius: var(--box-radius);
+    border:0px;
+    padding: 8px 0;
+    box-shadow: var(--regular-shadow);
+    background:var(--secondary-background);
+}
+
+.bigMenu ul li {
+    list-style-type: none;
+}
+
+.dropdown-menu > li > a,
+.bigMenu ul li a,
+.dropdown-menu > li > .dropdown-item-wrapper {
+    font-size: var(--base-font-size);
+    color:var(--primary-font-color);
+    margin: 0;
+    padding: 5px 10px;
+    border-radius: 0px;
+}
+
+/* List menus inset their items so a hovered item's background stays inside the menu's rounded
+   corners. Content panels (div.dropdown-menu) keep their own padding. */
+ul.dropdown-menu {
+    padding: 8px;
+}
+
+ul.dropdown-menu > li > a,
+ul.dropdown-menu > li > .dropdown-item-wrapper,
+.dropdown-menu span.radio,
+.dropdown-menu span.checkbox {
+    border-radius: var(--box-radius-small);
+}
+
+/* .btn-group sets white-space: nowrap for its buttons; panels inside one (filters, view settings)
+   hold labels and fields that must wrap. */
+.btn-group > div.dropdown-menu {
+    white-space: normal;
+}
+
+.pagetitle .dropdown-menu > li > a {
+    color:var(--primary-font-color);
+    text-decoration:none;
+}
+
+
+.dropdown-menu>.active>a,
+.dropdown-menu>.active>a:hover,
+.dropdown-menu>.active>a:focus {
+    color: var(--dropdown-link-hover-color);
+    background:var(--dropdown-link-hover-bg);
+}
+
+.dropdownTabs {
+    padding:5px;
+    display: flex;
+    flex-direction: row;
+
+    justify-content: space-around;
+    flex-wrap: wrap;
+
+    align-content: space-between;
+    border-bottom:1px solid var(--main-border-color);
+}
+
+.dropdownTabs a {
+
+}
+
+.dropdownTabs a:hover {
+    text-decoration: none;
+}
+
+
+
+.maincontentinner .viewDropDown .dropdown-menu > li > a:hover .muted,
+body .maincontentinner .viewDropDown .dropdown-menu li a.active,
+.dropdown-menu > li > a.active,
+.dropdown ul li.active a{
+    color: var(--dropdown-link-hover-color);
+    background:var(--dropdown-link-hover-bg);
+}
+
+.dropdown-menu > li > a:hover,
+.dropdown-menu > li > a:focus,
+.dropdown-submenu:hover > a,
+.dropdown-submenu:focus > a,
+.bigMenu ul li a,
+.bigMenu ul li a:hover,
+.bigMenu ul li a:focus {
+    color: var(--dropdown-link-hover-color) !important;
+    background:var(--dropdown-link-hover-bg) !important;
+}
+
+.dropdown-menu > li > a:hover small,
+.dropdown-menu > li > a:focus small,
+.dropdown-submenu:hover > a small,
+.dropdown-submenu:focus > a small,
+.bigMenu ul li a small,
+.bigMenu ul li a:hover small,
+.bigMenu ul li a:focus small {
+    color: var(--dropdown-link-hover-color) !important;
+}
+
+
+.dropdown-menu .nav-header {
+    padding-left: 10px;
+    padding-right: 10px;
+    padding-top:10px;
+    padding-bottom:5px;
+    font-size: var(--font-size-m);
+    color:var(--interactive-icon-color);
+    text-transform:none;
+}
+
+/* A chip while its pick is being saved (core/chips.js). */
+.ticketDropdown .dropdown-toggle.lt-chip-saving {
+    opacity: 0.6;
+}
+
+.ticketDropdown.show {
+    display:inline-block;
+}
+
+.ticketDropdown {
+    font-size: var(--font-size-m);
+
+}
+
+.ticketDropdown ul li a{
+    font-size: var(--font-size-m);
+}
+
+/* Open the menu just below the chip itself: the chip's wrapper can be taller than the chip (e.g. when
+   it's centered in a flex row), and a fixed offset then put the menu over the chip. */
+.ticketDropdown ul {
+    top: calc(100% + 1px);
+    font-size: var(--font-size-m);
+}
+
+/* A chip with its menu open shows the focus ring, the same as a focused input or select (some pages move
+   focus off the chip on click, which used to drop the ring there). */
+.ticketDropdown.open > .dropdown-toggle {
+    outline: 2px solid var(--focus-ring-color, var(--accent1));
+    outline-offset: 2px;
+}
+
+.ticketDropdown.userDropdown {
+    margin-top:-2px;
+}
+
+.ticketDropdown.userDropdown ul {
+    top: 33px;
+    left: 6px;
+}
+
+.dropRight ul,
+.ticketDropdown.userDropdown.dropRight ul{
+    right:0px;
+    left:auto;
+}
+
+.maincontent .ticketDropdown > a,
+.maincontent .ticketDropdown > a:link,
+.nyroModalCont .ticketDropdown > a,
+.nyroModalCont .ticketDropdown > a:link{
+    color:#fff;
+    padding:0px 10px;
+    white-space: nowrap;
+    border-radius:var(--box-radius-large);
+    margin-left:0px;
+    box-shadow:var(--min-shadow);
+}
+
+.maincontent .ticketDropdown.userDropdown > a,
+.maincontent .ticketDropdown.userDropdown > a:link,
+.nyroModalCont .ticketDropdown.userDropdown > a,
+.nyroModalCont .ticketDropdown.userDropdown > a:link {
+    padding-left:0px;
+}
+
+.maincontent .ticketDropdown.firstDropdown > a {
+    margin-left:0px;
+}
+
+.maincontent .ticketDropdown.lastDropdown > a {
+    padding-right:0px;
+}
+
+/* A chip keeps its full height in any container: as a plain inline link (table cells)
+   the line box collapsed it to ~16px while cards rendered 21px. */
+.dropdown.ticketDropdown > a {
+    display: inline-block;
+}
+
+/* Chips never underline on hover, wherever they sit (page, to-do dialog, widget).
+   Two classes so it beats the theme's `.sortableTicketList a:hover` underline. */
+.dropdown.ticketDropdown > a:hover,
+.dropdown.ticketDropdown > a:focus {
+    text-decoration: none;
+}
+
+
+.maincontent .ticketDropdown.colorized li a,
+.nyroModalCont .ticketDropdown.colorized li a{
+    color:#fff;
+}
+
+.maincontent .ticketDropdown.noBg {
+    background:transparent;
+
+
+}
+
+.maincontent .ticketDropdown.noBg a {
+    box-shadow: none;
+}
+
+.maincontent .ticketDropdown.noBg >a img {
+    margin-top:-1px;
+}
+
+.maincontent .dropdown img,
+.authorAvatar img {
+    width:23px;
+    border-radius: 12px;
+    border: 1px solid var(--neutral);
+    margin-top:1px;
+    padding:1px;
+}
+
+
+.maincontent .ticketDropdown.noBg >a:hover {
+    color:#000;
+}
+
+.maincontent .ticketDropdown.noBg >a:hover img {
+    border-color:var(--dropdown-link-hover-bg) !important
+}
+
+.maincontent .ticketDropdown ul li a[class*="label-"],
+.nyroModalCont .ticketDropdown ul li a[class*="label-"] {
+    padding: 5px 10px;
+    display:block;
+}
+
+
+.maincontent .ticketDropdown a.label-warning,
+.ss-values span.label-warning,
+.ss-list span.label-warning,
+.nyroModalCont .ticketDropdown a.label-warning,
+.label-warning,
+.label-yellow{
+    background:var(--yellow);
+    color:var(--yellow-text-color);
+}
+
+.maincontent .ticketDropdown a.label-info,
+.ss-values span.label-info,
+.ss-list span.label-info,
+.nyroModalCont .ticketDropdown a.label-info{
+    background:var(--dark-blue);
+    color:var(--dark-blue-text-color);
+}
+
+.maincontent .ticketDropdown a.label-important,
+.ss-values span.label-important,
+.ss-list span.label-important,
+.nyroModalCont .ticketDropdown a.label-important,
+.label-important{
+    background:var(--red);
+    color:var(--red-text-color);
+}
+
+.maincontent .ticketDropdown a.label-danger,
+.ss-values span.label-danger,
+.ss-list span.label-danger,
+.nyroModalCont .ticketDropdown a.label-danger,
+.label-danger,
+.label-red{
+    background:var(--dark-red);
+    color:var(--dark-red-text-color);
+}
+
+.maincontent .ticketDropdown a.label-success,
+.ss-values span.label-success,
+.ss-list span.label-success,
+.nyroModalCont .ticketDropdown a.label-success,
+.label-success,
+.label-green {
+    background:var(--green);
+    color:var(--green-text-color);
+}
+
+.maincontent .ticketDropdown a.label-default,
+.ss-values span.label-default,
+.ss-list span.label-default,
+.nyroModalCont .ticketDropdown a.label-default,
+.label-default{
+    background: var(--grey);
+    color:var(--grey-text-color);
+}
+
+.maincontent .ticketDropdown a.label-default.milestone,
+.nyroModalCont .ticketDropdown a.label-default.milestone {
+    color:var(--blue-text-color);
+}
+
+.maincontent .ticketDropdown a.label-purple,
+.ss-values span.label-purple,
+.ss-list span.label-purple,
+.nyroModalCont .ticketDropdown a.label-purple{
+    background:var(--purple);
+    color:var(--purple-text-color);
+}
+
+.maincontent .ticketDropdown a.label-pink,
+.ss-values span.label-pink,
+.ss-list span.label-pink,
+.nyroModalCont .ticketDropdown a.label-pink{
+    background:var(--pink);
+    color:var(--pink-text-color);
+}
+
+.maincontent .ticketDropdown a.label-brown,
+.ss-values span.label-brown,
+.ss-list span.label-brown,
+.nyroModalCont .ticketDropdown a.label-brown{
+    background:var(--brown);
+    color:var(--brown-text-color);
+}
+
+.maincontent .ticketDropdown a.label-blue,
+.ss-values span.label-blue,
+.ss-list span.label-blue,
+.nyroModalCont .ticketDropdown a.label-blue{
+    background:var(--blue);
+    color:var(--blue-text-color);
+}
+
+.maincontent .ticketDropdown a.label-dark-blue,
+.ss-values span.label-dark-blue,
+.ss-list span.label-dark-blue,
+.nyroModalCont .ticketDropdown a.label-dark-blue{
+    background:var(--dark-blue);
+    color:var(--dark-blue-text-color);
+}
+
+.maincontent .ticketDropdown a.label-darker-blue,
+.ss-values span.label-darker-blue,
+.ss-list span.label-darker-blue,
+.nyroModalCont .ticketDropdown a.label-darker-blue{
+    background:var(--darker-blue);
+    color:var(--darker-blue-text-color);
+}
+
+.maincontent .ticketDropdown a.label-green,
+.ss-values span.label-green,
+.ss-list span.label-green,
+.nyroModalCont .ticketDropdown a.label-green{
+    background:var(--green);
+    color:var(--green-text-color);
+}
+
+.maincontent .ticketDropdown a.label-dark-green,
+.ss-values span.label-dark-green,
+.ss-list span.label-dark-green,
+.nyroModalCont .ticketDropdown a.label-dark-green{
+    background:var(--dark-green);
+    color:var(--dark-green-text-color);
+}
+
+.maincontent .ticketDropdown a.label-red,
+.ss-values span.label-red,
+.ss-list span.label-red,
+.nyroModalCont .ticketDropdown a.label-red{
+    background:var(--red);
+    color:var(--red-text-color);
+}
+
+.maincontent .ticketDropdown a.label-dark-red,
+.ss-values span.label-dark-red,
+.ss-list span.label-dark-red,
+.nyroModalCont .ticketDropdown a.label-dark-red{
+    background:var(--dark-red);
+    color:var(--dark-red-text-color);
+}
+
+.maincontent .ticketDropdown a.label-grey,
+.ss-values span.label-grey,
+.ss-list span.label-grey,
+.nyroModalCont .ticketDropdown a.label-grey{
+    background:var(--grey);
+    color:var(--grey-text-color);
+}
+
+.maincontent .ticketDropdown a.label-default.effort,
+.nyroModalCont .ticketDropdown a.label-default.effort{
+    background:var(--secondary-background);
+    color:var(--primary-font-color);
+}
+
+.maincontent .ticketDropdown ul li,
+.nyroModalCont .ticketDropdown ul li {
+    margin-bottom:1px;
+    padding:0px 10px;
+}
+
+.maincontent .ticketDropdown.milestoneDropdown li a:hover{
+    background: var(--dropdown-link-hover-bg) !important;
+    color: var(--dropdown-link-hover-color) !important;
+}
+
+.maincontent .accordionTitle {
+    font-size: var(--font-size-l);
+    color: var(--primary-font-color);
+    margin-bottom: 10px;
+    font-weight: bold;
+    margin-left:0px;
+    border-radius: var(--accordion-header-radius);
+    padding: 5px 0px;
+}
+
+.maincontent .noBackground .accordionTitle {
+    color: var(--main-titles-color);
+}
+
+.maincontent .accordionTitle i {
+    display:inline-block;
+    width:15px;
+    text-align:center;
+    margin-right:5px;
+    border-radius:5px;
+}
+
+.maincontent .accordionTitle:hover i,
+.maincontent .accordionTitle i:hover {
+    background:var(--col-hover-bg);
+    color:var(--interactive-icon-color);
+}
+
+.maincontent .accordionTitle[class*="label-"] {
+    margin-left:0px;
+    border-radius: var(--accordion-header-radius);
+    padding: 5px 0px;
+    background: none;
+}
+
+.maincontent .accordionTitle.label-warning a{
+    background:none;
+    color:var(--yellow);
+}
+
+.maincontent .accordionTitle.label-important a {
+    background:none;
+    color:var(--red);
+}
+
+.maincontent .accordionTitle.label-info a {
+    background:none;
+    color:var(--dark-blue);
+}
+
+.maincontent .accordionTitle.label-danger a {
+    background:none;
+    color:var(--dark-red);
+}
+
+.maincontent .accordionTitle.label-success a {
+    background:none;
+    color:var(--green);
+}
+
+.maincontent .accordionTitle.label-default a {
+    background:none;
+    color:var(--grey);
+}
+
+.simpleAccordionContainer {
+    margin-bottom:15px;
+    padding-left: 20px;
+}
+
+.simpleAccordionContainer.kanban {
+    padding-left:0px;
+}
+
+.maincontent .accordionTitle .accordion-toggle i.fa:first-child {
+    width: 15px;
+    margin-top: 0px;
+    margin-right: 5px;
+    height: 15px;
+    line-height: 15px;
+    text-align: center;
+    border-radius: var(--element-radius);
+    font-size: var(--font-size-m);
+}
+
+.maincontent .accordionTitle .accordion-toggle i.fa:first-child:hover {
+    background: var(--main-menu-link-active-bg);
+}
+
+
+.ticketDropdown ul::after {
+    position: absolute;
+    top:-6px;
+    left: 10px;
+    transform: rotate(0deg);
+    display: inline-block;
+    border-right: 7px solid transparent;
+    border-bottom: 7px solid white;
+    border-left: 7px solid transparent;
+    content: '';
+}
+
+.dropdown-menu.pull-right::after {
+    right: 10px;
+    left:auto;
+}
+
+.tabbedwidget .dropdown-menu.pull-left,
+.mainwrapper .dropdown-menu.pull-left {
+    left: 10px;
+    right:auto;
+}
+
+.viewDropDown .dropdown-menu {
+    right:0px;
+    left:auto;
+}
+
+.viewDropDown .dropdown-menu li a.active{
+
+}
+
+.viewDropDown .dropdown-menu li a.active:hover {
+    color:#fff;
+}
+
+/* Checkbox / radio rows in menus and panels: input and label side by side on one line, label
+   wrapping next to the input (not under it). Replaces Bootstrap 2's float + negative-margin layout. */
+.dropdown-menu span.radio,
+.dropdown-menu span.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 0;
+    padding: 5px 10px;
+}
+
+.dropdown-menu span.radio input[type="radio"],
+.dropdown-menu span.checkbox input[type="checkbox"] {
+    float: none;
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.dropdown-menu span.radio label,
+.dropdown-menu span.checkbox label {
+    display: block;
+    flex: 1 1 auto;
+    margin: 0;
+    padding: 0;
+}
+
+.dropdown-menu span.radio {
+    font-size: var(--font-size-s);
+    color: var(--main-menu-link-color);
+    margin: 0px;
+}
+
+.dropdown-menu span.radio:hover {
+    color: var(--dropdown-link-hover-color);
+    background:var(--dropdown-link-hover-bg);
+}
+
+.wikiSelect {
+    margin-bottom:5px;
+}
+
+.dropdown-menu.iconpicker-container,
+.iconpicker-popover.popover {
+    width:215px;
+    min-width:215px;
+}
+
+.iconpicker-popover .popover-title {
+    display:none;
+}
+
+.btn-group .btn.titleIconPicker {
+    font-size: var(--font-size-xl);
+    line-height: 21px;
+    padding: 5px 6px;
+    color: var(--primary-font-color);
+    background-color: var(--secondary-background);
+    border: 1px solid var(--secondary-background);
+    border-radius: 3px;
+}
+
+.btn-group .btn.titleIconPicker:hover {
+    border: 1px solid var(--main-border-color);
+}
+
+.btn-group .btn.titleIconPicker .caret,
+.btn-group .btn.titleIconPicker .caret,
+.btn-group .btn.titleIconPicker:last-child .caret,
+.btn-group >.btn.titleIconPicker.dropdown-toggle .caret {
+    border-top-color: var(--primary-font-color);
+}
+
+.btn-group .btn.titleIconPicker:hover .caret,
+.btn-group .btn.titleIconPicker:hover .caret,
+.btn-group .btn.titleIconPicker:last-child:hover .caret,
+.btn-group >.btn.titleIconPicker.dropdown-toggle:hover .caret {
+    border-top-color: var(--secondary-action-hover-color);
+}
+
+.inlineDropDownContainerLeft {
+    float:left;
+    display:inline-block;
+}
+
+/* Subject switcher toggle — a subtle pill on the white header card (was
+   underlined white text, which is near-invisible since the header became a
+   light card). Dark text, soft pill background, caret. */
+.pagetitle .header-title-dropdown {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    width:auto;
+    color: var(--primary-font-color);
+    text-decoration:none;
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid transparent;
+    padding: 3px 12px;
+    /* 22px line + 3px padding + 1px border = 30px, the page icon's height, so a
+       header with a switcher is as tall as one with a plain title. */
+    line-height: 22px;
+    border-radius: 100px;
+    transition: background .12s, border-color .12s;
+}
+
+.pagetitle .header-title-dropdown .fa {
+    padding-left:4px;
+    font-size: .8em;
+    opacity:.55;
+}
+
+.pagetitle .header-title-dropdown:hover {
+    background: rgba(0, 0, 0, 0.09);
+    border-color: transparent;
+}
+
+/* Meta/metrics line under the title (subjectSwitcher subline slot). */
+.pagetitle .subjectSwitcher-subline {
+    font-size: var(--font-size-s);
+    color: var(--main-titles-color-subtle, var(--primary-font-color));
+    opacity: .6;
+    margin-top: 4px;
+}
+
+.dropdownWrapper {
+    position:relative;
+}
+
+.dropdownWrapper .border {
+    border-top:1px solid var(--neutral);
+}
+
+.headerEditDropdown {
+    float:right;
+    padding-top:20px;
+}
+
+/* Header action ⋮ — plain dark icon on the white header card (no circle,
+   was a bordered white button that read as an empty circle on the light box). */
+.pagetitle .btn-transparent {
+    background:transparent;
+    color:var(--primary-font-color);
+    border:none;
+    font-size: var(--font-size-l);
+}
+.pagetitle .btn-transparent:hover {
+    color:var(--accent1);
+    background:rgba(0, 0, 0, 0.05);
+    border-radius:6px;
+}
+
+.headerEditDropdown .dropdown-toggle {
+    padding:4px 13px;
+}
+
+.editCanvasDropdown {
+    right:0px;
+    left:auto;
+}
+
+
+.dropdown-menu>.active>a,
+.dropdown-menu>.active>a:hover,
+.dropdown-menu>.active>a:focus {
+    background:var(--main-menu-link-active-bg);
+    color:var(--main-menu-link-active-color);
+}
+
+.dropdown-menu .scroll-wrapper {
+    height:700px;
+    overflow:scroll;
+}
+
+.inlineDropDownContainer {
+    float:right;
+    position:relative;
+}
+
+.inlineDropDownContainer > a {
+    color: #aaa;
+    width: 24px;
+    line-height: 20px;
+    text-align: center;
+    padding-top: 1px;
+    border-radius: 5px;
+}
+
+.inlineDropDownContainer > a.btn {
+    width:auto;
+}
+
+.inlineDropDownContainer > a:last-child {
+    margin-right:-5px;
+}
+
+.inlineDropDownContainer > a:hover {
+    color: var(--accent1);
+    background: var(--col-hover-bg);
+}
+
+.inlineDropDownContainer .ticketDropDown {
+    float:right;
+    font-size: var(--font-size-xl);
+    color: var(--interactive-icon-color);
+    margin-right:-5px;
+}
+
+.inlineDropDownContainer .dropdown-menu {
+    right:0px;
+    left:auto;
+}
+
+.inlineDropDownContainer.dropright .dropdown-menu {
+
+    left:-5px;
+}
+
+.inlineDropDownContainer .dropdown-menu .border {
+    border-top:1px solid var(--neutral);
+}
+
+.inlineDropDownContainer .dropdown-menu li>span {
+    padding-left:15px;
+}
+
+.grid-stack-item-content .inlineDropDownContainer .ticketDropDown,
+.grid-stack-item-content .grid-handler-top{
+    color:var(--main-action-color);
+}
+
+.grid-stack-item-content.maincontentinner .inlineDropDownContainer .ticketDropDown,
+.grid-stack-item-content.maincontentinner .grid-handler-top {
+    color: var(--interactive-icon-color);
+}

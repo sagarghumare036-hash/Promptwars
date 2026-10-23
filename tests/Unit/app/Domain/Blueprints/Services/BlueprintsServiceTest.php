@@ -1,0 +1,883 @@
+<?php
+
+namespace Unit\app\Domain\Blueprints\Services;
+
+use Codeception\Test\Feature\Stub;
+use Leantime\Core\Auth\Permissions\PermissionService;
+use Leantime\Core\Exceptions\AuthorizationException;
+use Leantime\Core\Language as LanguageCore;
+use Leantime\Domain\Blueprints\Models\CanvasTemplate;
+use Leantime\Domain\Blueprints\Repositories\Blueprints as BlueprintsRepository;
+use Leantime\Domain\Blueprints\Services\Blueprints as BlueprintsService;
+use Leantime\Domain\Blueprints\Services\TemplateRegistry;
+use Leantime\Domain\ContentTemplates\Models\ContentTemplate;
+use Leantime\Domain\ContentTemplates\Services\ContentTemplateRegistry;
+use Leantime\Domain\Users\Repositories\Users as UserRepository;
+use Unit\TestCase;
+
+/**
+ * Unit tests for the Blueprints service: label translation helpers and the
+ * board-progress calculation (filled boxes / total boxes, max across boards).
+ */
+class BlueprintsServiceTest extends TestCase
+{
+    use Stub;
+
+    /**
+     * Build the service with a language stub that prefixes keys with "T:" so we
+     * can assert translation happened, plus optional repo/registry overrides.
+     */
+    private function service(?BlueprintsRepository $repo = null, ?TemplateRegistry $registry = null): BlueprintsService
+    {
+        $language = $this->make(LanguageCore::class, ['__' => fn (string $index) => 'T:'.$index]);
+
+        return new BlueprintsService(
+            $repo ?? $this->make(BlueprintsRepository::class),
+            $registry ?? new TemplateRegistry,
+            $language,
+            new ContentTemplateRegistry,
+        );
+    }
+
+    public function test_translated_boxes_run_titles_through_language(): void
+    {
+        $template = new CanvasTemplate([
+            'slug' => 'swot',
+            'boxes' => ['swot_strengths' => ['icon' => 'fa-x', 'title' => 'box.swot.strengths']],
+        ]);
+
+        $boxes = $this->service()->getTranslatedBoxes($template);
+
+        $this->assertSame('T:box.swot.strengths', $boxes['swot_strengths']['title']);
+        $this->assertSame('fa-x', $boxes['swot_strengths']['icon']);
+    }
+
+    public function test_translates_status_relates_and_data_labels(): void
+    {
+        $service = $this->service();
+        $template = new CanvasTemplate(['slug' => 'x']); // base defaults
+
+        $this->assertSame('T:status.draft', $service->getTranslatedStatusLabels($template)['status_draft']['title']);
+        $this->assertSame('T:relates.none', $service->getTranslatedRelatesLabels($template)['relates_none']['title']);
+        $this->assertSame('T:label.assumptions', $service->getTranslatedDataLabels($template)[1]['title']);
+    }
+
+    public function test_disclaimer_is_empty_when_unset_and_translated_otherwise(): void
+    {
+        $service = $this->service();
+
+        $this->assertSame('', $service->getTranslatedDisclaimer(new CanvasTemplate(['slug' => 'x'])));
+        $this->assertSame(
+            'T:text.lean.disclaimer',
+            $service->getTranslatedDisclaimer(new CanvasTemplate(['slug' => 'lean', 'disclaimer' => 'text.lean.disclaimer']))
+        );
+    }
+
+    public function test_board_progress_is_fraction_of_filled_boxes(): void
+    {
+        // SWOT has 4 boxes; board 1 has 2 boxes with items -> 0.5.
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProgressCount' => fn () => [
+                ['canvasType' => 'swotcanvas', 'canvasId' => 1, 'box' => 'swot_strengths', 'boxItems' => 3],
+                ['canvasType' => 'swotcanvas', 'canvasId' => 1, 'box' => 'swot_threats', 'boxItems' => 1],
+                ['canvasType' => 'swotcanvas', 'canvasId' => 1, 'box' => 'swot_weaknesses', 'boxItems' => 0],
+            ],
+        ]);
+
+        $progress = $this->service($repo)->getBoardProgress('1', ['swotcanvas']);
+
+        $this->assertEqualsWithDelta(0.5, $progress['swotcanvas'], 0.001);
+    }
+
+    public function test_board_progress_without_project_uses_the_current_project(): void
+    {
+        session(['currentProject' => 17]);
+
+        $queriedProjectIds = [];
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProgressCount' => function (int $projectId) use (&$queriedProjectIds) {
+                $queriedProjectIds[] = $projectId;
+
+                return [];
+            },
+        ]);
+
+        $this->service($repo)->getBoardProgress();
+        $this->service($repo)->getBoardProgress('5');
+
+        $this->assertSame([17, 5], $queriedProjectIds);
+    }
+
+    public function test_board_progress_takes_max_across_boards(): void
+    {
+        // Board 2 has all 4 SWOT boxes filled -> max progress 1.0.
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProgressCount' => fn () => [
+                ['canvasType' => 'swotcanvas', 'canvasId' => 1, 'box' => 'swot_strengths', 'boxItems' => 1],
+                ['canvasType' => 'swotcanvas', 'canvasId' => 2, 'box' => 'swot_strengths', 'boxItems' => 1],
+                ['canvasType' => 'swotcanvas', 'canvasId' => 2, 'box' => 'swot_weaknesses', 'boxItems' => 1],
+                ['canvasType' => 'swotcanvas', 'canvasId' => 2, 'box' => 'swot_opportunities', 'boxItems' => 1],
+                ['canvasType' => 'swotcanvas', 'canvasId' => 2, 'box' => 'swot_threats', 'boxItems' => 1],
+            ],
+        ]);
+
+        $progress = $this->service($repo)->getBoardProgress('1', ['swotcanvas']);
+
+        $this->assertEqualsWithDelta(1.0, $progress['swotcanvas'], 0.001);
+    }
+
+    // ---------------------------------------------------------------------
+    // Boards overview (absorbed from the former Strategy service).
+    // ---------------------------------------------------------------------
+
+    public function test_build_recent_progress_seeds_metadata_and_removes_used_type(): void
+    {
+        $service = $this->service();
+
+        $metadata = $service->getBoardMetadata();
+
+        $recentlyUpdated = [
+            ['type' => 'valuecanvas', 'title' => 'My Value Board', 'modified' => '2026-05-20 10:00:00', 'id' => 11],
+        ];
+
+        $result = $service->buildRecentProgressCanvas($recentlyUpdated, $metadata);
+
+        $this->assertArrayHasKey('valuecanvas', $result);
+        $this->assertSame(1, $result['valuecanvas']['count']);
+        $this->assertSame('My Value Board', $result['valuecanvas']['lastTitle']);
+        $this->assertSame('2026-05-20 10:00:00', $result['valuecanvas']['lastUpdate']);
+        $this->assertSame(11, $result['valuecanvas']['lastCanvasId']);
+        // Board links point at the consolidated Blueprints routes.
+        $this->assertSame('blueprints/value', $result['valuecanvas']['module']);
+
+        // The consumed type must be removed from the remaining "other" boards map.
+        $this->assertArrayNotHasKey('valuecanvas', $metadata);
+        $this->assertArrayHasKey('swotcanvas', $metadata);
+    }
+
+    public function test_build_recent_progress_increments_count_for_repeat_type(): void
+    {
+        $service = $this->service();
+
+        $metadata = $service->getBoardMetadata();
+
+        $recentlyUpdated = [
+            ['type' => 'swotcanvas', 'title' => 'First', 'modified' => '2026-05-21 09:00:00', 'id' => 1],
+            ['type' => 'swotcanvas', 'title' => 'Second', 'modified' => '2026-05-22 09:00:00', 'id' => 2],
+            ['type' => 'swotcanvas', 'title' => 'Third', 'modified' => '2026-05-23 09:00:00', 'id' => 3],
+        ];
+
+        $result = $service->buildRecentProgressCanvas($recentlyUpdated, $metadata);
+
+        $this->assertSame(3, $result['swotcanvas']['count']);
+        // The seeded values come from the FIRST occurrence only.
+        $this->assertSame('First', $result['swotcanvas']['lastTitle']);
+        $this->assertSame(1, $result['swotcanvas']['lastCanvasId']);
+    }
+
+    public function test_every_blueprint_template_is_listed_on_the_boards_overview(): void
+    {
+        // Regression: retros lost its only entry point when its menu link was
+        // dropped, because the overview never listed it. Every YAML template
+        // must be a board type with metadata so the overview can link to it.
+        $service = $this->service();
+        $boardTypes = $service->getBoardTypes();
+        $boardMetadata = $service->getBoardMetadata();
+
+        foreach ((new TemplateRegistry)->slugs() as $slug) {
+            $boardType = $slug.'canvas';
+
+            $this->assertContains($boardType, $boardTypes, "Blueprint '{$slug}' is missing from getBoardTypes()");
+            $this->assertArrayHasKey($boardType, $boardMetadata, "Blueprint '{$slug}' is missing from getBoardMetadata()");
+            $this->assertSame('blueprints/'.$slug, $boardMetadata[$boardType]['module']);
+        }
+    }
+
+    public function test_build_recent_progress_with_empty_input_returns_empty(): void
+    {
+        $service = $this->service();
+
+        $metadata = $service->getBoardMetadata();
+        $metadataCountBefore = count($metadata);
+
+        $result = $service->buildRecentProgressCanvas([], $metadata);
+
+        $this->assertSame([], $result);
+        // Nothing consumed, so the metadata map is untouched.
+        $this->assertCount($metadataCountBefore, $metadata);
+    }
+
+    public function test_boards_overview_assembles_render_ready_struct(): void
+    {
+        $recentlyUpdated = [
+            ['type' => 'leancanvas', 'title' => 'Lean A', 'modified' => '2026-05-25 12:00:00', 'id' => 99],
+        ];
+        $progress = ['leancanvas' => 0.5];
+
+        // getBoardsOverview now self-calls getLastUpdatedCanvas()/getBoardProgress(),
+        // so partial-mock just those two and exercise the real assembly logic.
+        $service = $this->make(BlueprintsService::class, [
+            'getLastUpdatedCanvas' => fn () => $recentlyUpdated,
+            'getBoardProgress' => fn () => $progress,
+        ]);
+
+        $overview = $service->getBoardsOverview(7);
+
+        $this->assertArrayHasKey('recentProgressCanvas', $overview);
+        $this->assertArrayHasKey('otherBoards', $overview);
+        $this->assertArrayHasKey('recentlyUpdatedCanvas', $overview);
+        $this->assertArrayHasKey('canvasProgress', $overview);
+
+        $this->assertSame($recentlyUpdated, $overview['recentlyUpdatedCanvas']);
+        $this->assertSame($progress, $overview['canvasProgress']);
+
+        // leancanvas was recently used, so it lands in recentProgressCanvas
+        // and is removed from the remaining "other" boards.
+        $this->assertArrayHasKey('leancanvas', $overview['recentProgressCanvas']);
+        $this->assertSame('Lean A', $overview['recentProgressCanvas']['leancanvas']['lastTitle']);
+        $this->assertArrayNotHasKey('leancanvas', $overview['otherBoards']);
+    }
+
+    public function test_boards_overview_passes_project_id_to_self_calls(): void
+    {
+        $capturedLastUpdatedId = null;
+        $capturedProgressId = null;
+
+        $service = $this->make(BlueprintsService::class, [
+            'getLastUpdatedCanvas' => function ($projectId) use (&$capturedLastUpdatedId) {
+                $capturedLastUpdatedId = $projectId;
+
+                return [];
+            },
+            'getBoardProgress' => function ($projectId) use (&$capturedProgressId) {
+                $capturedProgressId = $projectId;
+
+                return [];
+            },
+        ]);
+
+        $service->getBoardsOverview(7);
+
+        $this->assertSame(7, $capturedLastUpdatedId);
+        $this->assertSame('7', $capturedProgressId, 'getBoardProgress receives the project id cast to string');
+    }
+
+    // ---------------------------------------------------------------------
+    // Secured by-id board/item CRUD chokepoint.
+    //
+    // Canvas boards/items live in the shared zp_canvas / zp_canvas_items tables (one id
+    // sequence across every variant). Every by-id operation must authorize against the
+    // entity's REAL project (resolved by id + canvas type), never the session project. Reads
+    // soft-deny (return the neutral "missing" value) so they are not a cross-project existence
+    // oracle; writes fail CLOSED with an AuthorizationException and never touch the repo.
+    // ---------------------------------------------------------------------
+
+    private function allowingPermissions(): PermissionService
+    {
+        return $this->make(PermissionService::class, [
+            'authorize' => fn () => null,
+            'currentUserCan' => fn () => true,
+        ]);
+    }
+
+    private function denyingPermissions(): PermissionService
+    {
+        return $this->make(PermissionService::class, [
+            'authorize' => function (): void {
+                throw new AuthorizationException;
+            },
+            'currentUserCan' => fn () => false,
+        ]);
+    }
+
+    private function securedService(BlueprintsRepository $repo, PermissionService $perms): BlueprintsService
+    {
+        $service = $this->service($repo);
+        $service->setPermissionService($perms);
+
+        return $service;
+    }
+
+    public function test_get_canvas_item_returns_false_for_missing_or_foreign_item_without_loading_it(): void
+    {
+        // Resolver null = missing id OR an id whose board is a different canvas type. Must
+        // return false WITHOUT loading the item — no cross-project existence oracle.
+        $loaded = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => fn () => null,
+            'getSingleCanvasItem' => function () use (&$loaded) {
+                $loaded++;
+
+                return ['id' => 1];
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        $this->assertFalse($service->getCanvasItem(123, 'swotcanvas'));
+        $this->assertSame(0, $loaded, 'A missing/foreign item must not be loaded');
+    }
+
+    public function test_get_canvas_item_soft_denies_when_view_not_permitted(): void
+    {
+        $loaded = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => fn () => 9,
+            'getSingleCanvasItem' => function () use (&$loaded) {
+                $loaded++;
+
+                return ['id' => 1];
+            },
+        ]);
+        $service = $this->securedService($repo, $this->make(PermissionService::class, ['currentUserCan' => fn () => false]));
+
+        $this->assertFalse($service->getCanvasItem(1, 'swotcanvas'));
+        $this->assertSame(0, $loaded, 'An unauthorized item returns the same neutral result as a missing one');
+    }
+
+    public function test_get_canvas_item_is_type_scoped_and_returns_item_when_authorized(): void
+    {
+        $resolvedType = null;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => function ($id, $type) use (&$resolvedType) {
+                $resolvedType = $type;
+
+                return 9;
+            },
+            'getSingleCanvasItem' => fn () => ['id' => 7, 'canvasId' => 3],
+        ]);
+        $service = $this->securedService($repo, $this->make(PermissionService::class, ['currentUserCan' => fn () => true]));
+
+        $item = $service->getCanvasItem(7, 'swotcanvas');
+
+        $this->assertSame(7, $item['id']);
+        $this->assertSame('swotcanvas', $resolvedType, 'The resolver must be type-scoped so a foreign canvas type cannot match');
+    }
+
+    public function test_get_board_items_returns_empty_for_foreign_board(): void
+    {
+        $loaded = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProjectId' => fn () => null,
+            'getCanvasItemsById' => function () use (&$loaded) {
+                $loaded++;
+
+                return [['id' => 1]];
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        $this->assertSame([], $service->getBoardItems(999, 'swotcanvas', 'swotcanvasitem'));
+        $this->assertSame(0, $loaded, 'A foreign/unknown board must not have its items read');
+    }
+
+    public function test_patch_canvas_item_throws_and_never_writes_for_unresolved_item(): void
+    {
+        $patched = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => fn () => null,
+            'patchCanvasItem' => function () use (&$patched) {
+                $patched++;
+
+                return true;
+            },
+        ]);
+        // allow-all permissions: the deny must come from the null resolution, not the role.
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        try {
+            $service->patchCanvasItem(5, ['status' => 'x'], 'swotcanvas');
+            $this->fail('Expected AuthorizationException for an unresolved item');
+        } catch (AuthorizationException) {
+            // expected
+        }
+        $this->assertSame(0, $patched, 'A missing/foreign item must never be patched');
+    }
+
+    public function test_patch_canvas_item_throws_when_edit_denied(): void
+    {
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => fn () => 9,
+            'patchCanvasItem' => fn () => true,
+        ]);
+        $service = $this->securedService($repo, $this->denyingPermissions());
+
+        $this->expectException(AuthorizationException::class);
+        $service->patchCanvasItem(5, ['status' => 'x'], 'swotcanvas');
+    }
+
+    public function test_update_canvas_item_resolves_project_from_item_id_not_payload_canvas_id(): void
+    {
+        // Relocation fence: the project is resolved from the EXISTING item's id, not from the
+        // attacker-supplied canvasId in the payload.
+        $resolvedItemId = null;
+        $wrote = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => function ($id) use (&$resolvedItemId) {
+                $resolvedItemId = $id;
+
+                return 9;
+            },
+            'editCanvasItem' => function () use (&$wrote) {
+                $wrote++;
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        $service->updateCanvasItem(['itemId' => 42, 'canvasId' => 9999, 'description' => 'x'], 'swotcanvas');
+
+        $this->assertSame(42, $resolvedItemId, 'Project must be resolved from itemId, not the payload canvasId');
+        $this->assertSame(1, $wrote);
+    }
+
+    public function test_update_canvas_item_rejects_an_array_item_id_and_writes_the_authorized_id(): void
+    {
+        // Type-confusion fence: `itemId[]=N` must not be cast to 1 for authorization while the
+        // repository writes row N. Arrays are rejected; scalar ids are written back as the int.
+        $writtenIds = [];
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => fn () => 9,
+            'editCanvasItem' => function ($values) use (&$writtenIds) {
+                $writtenIds[] = [$values['itemId'], $values['id']];
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        try {
+            $service->updateCanvasItem(['itemId' => [77], 'description' => 'x'], 'swotcanvas');
+            $this->fail('An array item id must be rejected');
+        } catch (AuthorizationException) {
+            $this->assertSame([], $writtenIds);
+        }
+
+        $service->updateCanvasItem(['itemId' => '42', 'id' => 77, 'description' => 'x'], 'swotcanvas');
+        $this->assertSame([[42, 42]], $writtenIds, 'The write must target exactly the authorized id');
+    }
+
+    public function test_create_canvas_item_throws_and_never_inserts_for_unknown_board(): void
+    {
+        $inserted = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProjectId' => fn () => null,
+            'addCanvasItem' => function () use (&$inserted) {
+                $inserted++;
+
+                return '1';
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        try {
+            $service->createCanvasItem(['canvasId' => 9999, 'box' => 'x'], 'swotcanvas');
+            $this->fail('Expected AuthorizationException for an unknown target board');
+        } catch (AuthorizationException) {
+        }
+        $this->assertSame(0, $inserted, 'An item must never be created into an unknown/foreign board');
+    }
+
+    public function test_delete_canvas_item_throws_and_never_deletes_for_unresolved_item(): void
+    {
+        $deleted = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasItemProjectId' => fn () => null,
+            'delCanvasItem' => function () use (&$deleted) {
+                $deleted++;
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        try {
+            $service->deleteCanvasItem(5, 'swotcanvas');
+            $this->fail('Expected AuthorizationException for an unresolved item');
+        } catch (AuthorizationException) {
+        }
+        $this->assertSame(0, $deleted, 'A missing/foreign item must never be deleted');
+    }
+
+    public function test_delete_board_throws_and_never_deletes_for_unresolved_board(): void
+    {
+        $deleted = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProjectId' => fn () => null,
+            'deleteCanvas' => function () use (&$deleted) {
+                $deleted++;
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        try {
+            $service->deleteBoard(5, 'swotcanvas');
+            $this->fail('Expected AuthorizationException for an unresolved board');
+        } catch (AuthorizationException) {
+        }
+        $this->assertSame(0, $deleted, 'A missing/foreign board must never be deleted');
+    }
+
+    public function test_copy_board_throws_when_source_unresolved_and_never_copies(): void
+    {
+        $copied = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProjectId' => fn () => null,
+            'copyCanvas' => function () use (&$copied) {
+                $copied++;
+
+                return 1;
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        try {
+            $service->copyBoard(5, 7, 1, 'Copy', 'swotcanvas');
+            $this->fail('Expected AuthorizationException for an unresolved source board');
+        } catch (AuthorizationException) {
+        }
+        $this->assertSame(0, $copied, 'A board must never be copied from an unknown/foreign source');
+    }
+
+    public function test_merge_board_requires_both_boards_to_resolve(): void
+    {
+        // Source (1) resolves but target (2) does not -> deny, never merge.
+        $merged = 0;
+        $repo = $this->make(BlueprintsRepository::class, [
+            'getCanvasProjectId' => fn ($id) => $id === 1 ? 9 : null,
+            'mergeCanvas' => function () use (&$merged) {
+                $merged++;
+
+                return true;
+            },
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        try {
+            $service->mergeBoard(2, 1, 'swotcanvas');
+            $this->fail('Expected AuthorizationException when a board does not resolve');
+        } catch (AuthorizationException) {
+        }
+        $this->assertSame(0, $merged, 'Merge must not run unless BOTH boards resolve');
+    }
+
+    public function test_import_authorizes_create_on_target_project_before_doing_anything(): void
+    {
+        // import() authorizes CREATE against the passed projectId first — a denial throws
+        // before the file/template/repo are ever touched (it is reachable via JSON-RPC with an
+        // arbitrary projectId).
+        $repo = $this->make(BlueprintsRepository::class, [
+            'existCanvas' => function (): bool {
+                $this->fail('import must deny before touching the repository');
+
+                return false;
+            },
+        ]);
+        $service = $this->securedService($repo, $this->denyingPermissions());
+
+        $this->expectException(AuthorizationException::class);
+        $service->import('/tmp/does-not-matter.xml', 'swot', 55, 1);
+    }
+
+    // ---------------------------------------------------------------------
+    // import() path-validation regression tests (SSRF / LFI / CWE-918).
+    // ---------------------------------------------------------------------
+
+    public function test_import_rejects_ssrf_url_wrappers(): void
+    {
+        // URL wrappers such as http://, ftp:// resolve to false via realpath(),
+        // but even if/when a stream wrapper could produce a realpath, the
+        // allow-list check catches it. This test also guards the more
+        // subtle case of file:///etc/passwd which some PHP builds resolve.
+        $service = $this->securedService(
+            $this->make(BlueprintsRepository::class),
+            $this->allowingPermissions()
+        );
+
+        // SSRF: HTTP URL — realpath() returns false, caught as "file not found".
+        $this->assertFalse(
+            $service->import('http://169.254.169.254/latest/meta-data/', 'lean', 55, 1),
+            'HTTP URL must be rejected'
+        );
+
+        // SSRF: FTP URL.
+        $this->assertFalse(
+            $service->import('ftp://evil.com/blueprint.xml', 'lean', 55, 1),
+            'FTP URL must be rejected'
+        );
+
+        // LFI: file:// wrapper. Some PHP builds resolve file:///etc/passwd
+        // via realpath() and would read it without the allow-list guard.
+        $this->assertFalse(
+            $service->import('file:///etc/passwd', 'lean', 55, 1),
+            'file:// URL must be rejected'
+        );
+    }
+
+    public function test_import_rejects_lfi_absolute_path_to_system_file(): void
+    {
+        // Create an .xml file in a directory that is NOT in the allowed list.
+        // base_path('storage') is reliably outside sys_temp_dir, userfiles, and
+        // Blueprints/imports — unlike /var/tmp which can equal sys_get_temp_dir()
+        // on some systems.
+        $service = $this->securedService(
+            $this->make(BlueprintsRepository::class),
+            $this->allowingPermissions()
+        );
+
+        $outOfBounds = base_path('storage/leantime_lfi_test_'.uniqid('', true).'.xml');
+        file_put_contents($outOfBounds, '<canvas key="leancanvas"><title>LFI Test</title></canvas>');
+
+        try {
+            $this->assertFalse(
+                $service->import($outOfBounds, 'lean', 55, 1),
+                'Absolute path to an .xml file outside allowed directories must be rejected'
+            );
+        } finally {
+            if (file_exists($outOfBounds)) {
+                unlink($outOfBounds);
+            }
+        }
+    }
+
+    public function test_import_rejects_dot_dot_path_traversal(): void
+    {
+        // Create a real .xml file outside the allow-list (in storage/),
+        // then reach it via a path that starts in sys_get_temp_dir() and
+        // traverses up to the filesystem root with ../ before descending
+        // into the project. realpath() must resolve the ../ segments and
+        // the allow-list must reject the canonicalized path — this proves
+        // both canonicalization AND allow-list work, not just extension
+        // validation.
+        $service = $this->securedService(
+            $this->make(BlueprintsRepository::class),
+            $this->allowingPermissions()
+        );
+
+        $outOfBounds = base_path('storage/traversal_target_'.uniqid('', true).'.xml');
+        file_put_contents($outOfBounds, '<canvas key="leancanvas"><title>Traversal Test</title></canvas>');
+
+        // Walk from temp dir up to root (depth + 1 levels), then down
+        // into the project storage directory.
+        $upLevels = substr_count(sys_get_temp_dir(), DIRECTORY_SEPARATOR) + 1;
+        $fromRoot = ltrim($outOfBounds, DIRECTORY_SEPARATOR);
+        $traversal = sys_get_temp_dir().DIRECTORY_SEPARATOR
+            .str_repeat('..'.DIRECTORY_SEPARATOR, $upLevels + 1)
+            .$fromRoot;
+
+        try {
+            $this->assertFalse(
+                $service->import($traversal, 'lean', 55, 1),
+                'Path traversal (../) to a valid .xml outside allowed dirs must be rejected'
+            );
+        } finally {
+            if (file_exists($outOfBounds)) {
+                unlink($outOfBounds);
+            }
+        }
+    }
+
+    public function test_import_rejects_sibling_prefix_bypass(): void
+    {
+        // str_starts_with without DIRECTORY_SEPARATOR anchoring would
+        // allow imports-evil/x to match against allowed …/imports.
+        // Create a sibling of the Blueprints imports directory (under
+        // the project root, guaranteed writable) to test the anchor.
+        $service = $this->securedService(
+            $this->make(BlueprintsRepository::class),
+            $this->allowingPermissions()
+        );
+
+        $allowedDir = APP_ROOT.'/app/Domain/Blueprints/imports';
+        if (! is_dir($allowedDir)) {
+            mkdir($allowedDir, 0700, true);
+        }
+        $siblingDir = APP_ROOT.'/app/Domain/Blueprints/imports-sibling-'.uniqid('', true);
+        if (! is_dir($siblingDir)) {
+            mkdir($siblingDir, 0700, true);
+        }
+        $siblingFile = $siblingDir.'/blueprint.xml';
+        file_put_contents($siblingFile, '<canvas key="leancanvas"><title>Test</title></canvas>');
+
+        try {
+            $this->assertFalse(
+                $service->import($siblingFile, 'lean', 55, 1),
+                'Sibling-prefix path (e.g. /tmp-evil/…) must NOT match allowed /tmp'
+            );
+        } finally {
+            unlink($siblingFile);
+            rmdir($siblingDir);
+        }
+    }
+
+    public function test_import_rejects_disallowed_file_extensions(): void
+    {
+        // Only .xml is permitted. Other extensions must be
+        // rejected even when the file sits in an allowed directory.
+        $service = $this->securedService(
+            $this->make(BlueprintsRepository::class),
+            $this->allowingPermissions()
+        );
+
+        // Use tempnam() + rename to get unique filenames — fixed names
+        // in the shared temp dir can collide with crashed-run leftovers
+        // or concurrent test processes.
+        $phpBase = tempnam(sys_get_temp_dir(), 'leantime.');
+        $phpFile = $phpBase.'.php';
+        rename($phpBase, $phpFile);
+        file_put_contents($phpFile, '<?php echo "pwned";');
+
+        $txtBase = tempnam(sys_get_temp_dir(), 'leantime.');
+        $txtFile = $txtBase.'.txt';
+        rename($txtBase, $txtFile);
+        file_put_contents($txtFile, 'not xml');
+
+        try {
+            $this->assertFalse(
+                $service->import($phpFile, 'lean', 55, 1),
+                '.php extension must be rejected in an allowed directory'
+            );
+            $this->assertFalse(
+                $service->import($txtFile, 'lean', 55, 1),
+                '.txt extension must be rejected in an allowed directory'
+            );
+        } finally {
+            if (file_exists($phpFile)) {
+                unlink($phpFile);
+            }
+            if (file_exists($txtFile)) {
+                unlink($txtFile);
+            }
+        }
+    }
+
+    public function test_import_accepts_xml_file_in_allowed_temp_dir(): void
+    {
+        // A .xml file placed in sys_get_temp_dir() (the normal upload flow)
+        // must pass path validation and successfully import via the repo.
+        // The repository is stubbed so the import completes and returns a
+        // known canvas id, proving that path validation did NOT block it.
+        $expectedId = 42;
+        // addCanvas()/addCanvasItem() are declared `false|string` (insertGetId), so the
+        // stubs must return strings — import() casts the id to int on the way out.
+        $repo = $this->make(BlueprintsRepository::class, [
+            'existCanvas' => fn () => false,
+            'addCanvas' => fn () => (string) $expectedId,
+            'addCanvasItem' => fn () => '1',
+        ]);
+        $service = $this->securedService($repo, $this->allowingPermissions());
+
+        // import() resolves UserRepository via app()->make(). Unit tests
+        // disable the database, so bind a stub that never touches it.
+        $usersStub = $this->make(UserRepository::class, [
+            'getUserIdByName' => fn () => 1,
+        ]);
+        app()->instance(UserRepository::class, $usersStub);
+
+        // Mirrors what BlueprintsExport::buildXml() actually emits — in particular
+        // status/relates carry their value in a `key` attribute, which is what
+        // import() reads. Element text there is silently dropped.
+        $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<canvas key="leancanvas">
+    <title>Security Test Canvas</title>
+    <content>
+        <element key="problem">
+            <item>
+                <author id="1" firstname="A" lastname="B"/>
+                <description>Test item</description>
+                <status key="status_draft" />
+                <relates key="relates_none" />
+                <assumptions>none</assumptions>
+                <data>none</data>
+                <conclusion>none</conclusion>
+            </item>
+        </element>
+    </content>
+</canvas>
+XML;
+
+        $tmpBase = tempnam(sys_get_temp_dir(), 'leantime.');
+        $tempFile = $tmpBase.'.xml';
+        rename($tmpBase, $tempFile);
+        file_put_contents($tempFile, $xml);
+
+        try {
+            $result = $service->import($tempFile, 'lean', 55, 1);
+            // Path validation passed and repo returned the expected canvas id.
+            $this->assertSame(
+                $expectedId,
+                $result,
+                'XML file in allowed dir must pass path validation and be imported'
+            );
+        } finally {
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
+        }
+    }
+
+    public function test_create_board_applies_start_content_against_the_slug_not_the_db_type(): void
+    {
+        // Regression test for Phase 4: createBoard() is called with the DATABASE
+        // type ("swotcanvas") but both the Blueprints TemplateRegistry and the
+        // ContentTemplateRegistry key by the SLUG ("swot"). The original code
+        // called TemplateRegistry::get($canvasType), which required a slug and
+        // silently returned null for the db-type form — making applyStartContent
+        // a no-op. This test locks in the fix: getByDatabaseType() bridges, and
+        // the resolved slug flows to the ContentTemplates lookups.
+        $blueprint = new CanvasTemplate([
+            'slug' => 'swot',
+            'startContent' => 'starter-swot',
+        ]);
+        $registry = new class($blueprint) extends TemplateRegistry
+        {
+            public function __construct(private CanvasTemplate $bp) {}
+
+            public function get(string $slug): ?CanvasTemplate
+            {
+                // Bug reproduction: original code called this with 'swotcanvas'.
+                // The real registry only knows 'swot' — so it returned null and
+                // applyStartContent bailed. Test-side we mirror that behavior.
+                return $slug === 'swot' ? $this->bp : null;
+            }
+
+            public function getByDatabaseType(string $dbType): ?CanvasTemplate
+            {
+                // Mirror the shipped str_ends_with/substr strip so this stub and
+                // the production slug-resolution can't drift (per review CR).
+                $suffix = 'canvas';
+                $slug = str_ends_with($dbType, $suffix) && strlen($dbType) > strlen($suffix)
+                    ? substr($dbType, 0, -strlen($suffix))
+                    : $dbType;
+
+                return $this->get($slug);
+            }
+        };
+
+        $contentTemplates = new class extends ContentTemplateRegistry
+        {
+            /** @var string[] */
+            public array $seenSlugs = [];
+
+            // Override the parent constructor (the stub needs no deps) and record
+            // the slugs get() is consulted with, so the test asserts on them
+            // afterward. Avoids a by-reference property — PHP ^8.2 can't promote
+            // by reference, and a typed-property reference is brittle.
+            public function __construct() {}
+
+            public function get(string $appliesTo, string $key): ?ContentTemplate
+            {
+                $this->seenSlugs[] = $appliesTo;
+
+                return null; // null lookup exits applyStartContent early, but the assertion is on WHAT slug reached us.
+            }
+        };
+
+        $repo = $this->make(BlueprintsRepository::class, [
+            'addCanvas' => fn () => '77',
+        ]);
+
+        $language = $this->make(LanguageCore::class, ['__' => fn (string $index) => 'T:'.$index]);
+        $service = new BlueprintsService($repo, $registry, $language, $contentTemplates);
+        $service->setPermissionService($this->allowingPermissions());
+
+        $service->createBoard(['projectId' => 5, 'title' => 't'], 'swotcanvas');
+
+        $this->assertSame(['swot'], $contentTemplates->seenSlugs, 'ContentTemplates must be consulted with the SLUG, not the DB type');
+    }
+}
