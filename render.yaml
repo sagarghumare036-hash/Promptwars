@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: promptwars
+    runtime: image
+    image:
+      url: leantime/leantime:latest
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: LEAN_DB_DEFAULT_CONNECTION
+        value: pgsql
+      - key: LEAN_DB_HOST
+        fromDatabase:
+          name: promptwars-db
+          property: host
+      - key: LEAN_DB_PORT
+        fromDatabase:
+          name: promptwars-db
+          property: port
+      - key: LEAN_DB_DATABASE
+        fromDatabase:
+          name: promptwars-db
+          property: database
+      - key: LEAN_DB_USER
+        fromDatabase:
+          name: promptwars-db
+          property: user
+      - key: LEAN_DB_PASSWORD
+        fromDatabase:
+          name: promptwars-db
+          property: password
+
+databases:
+  - name: promptwars-db
+    plan: free
+    region: oregon
